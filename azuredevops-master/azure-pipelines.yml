@@ -1,0 +1,52 @@
+# Starter pipeline
+# Start with a minimal pipeline that you can customize to build and deploy your code.
+# Add steps that build, run tests, deploy, and more:
+# https://aka.ms/yaml
+name: 0.1.$(Rev:r)
+
+variables:
+  - group: theale-prism-central
+
+trigger:
+  - master
+
+pool: 'default'
+
+stages:
+- stage: Build
+  displayName: Build and push stage
+  jobs:
+  - job: Build
+    displayName: Build job
+    steps:
+    - task: Docker@2
+      displayName: Build and push image
+      inputs:
+        containerRegistry: $(dockerRegistryServiceConnection)
+        repository: ukdemo/calm-dsl
+        command: buildAndPush
+        tags: |
+          latest
+          $(Build.BuildId)
+      
+- stage: Deploy
+  jobs:
+  - deployment: DeployCalm
+    displayName: 'Deploy to Calm'
+    container:
+      image: ukdemo/calm-dsl:latest
+    environment: 'dev'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - checkout: none
+          
+          - script: |
+              sudo ln -s /root/.local/bin/calm /usr/local/bin/calm
+              sudo calm init dsl -i $(pc_ip) -P $(pc_port) -u $(pc_user) -p $(pc_pass) -pj $(calm_projectName)
+              sudo OS_USERNAME=$(os_username) OS_PASSWORD=$(os_password) calm create bp -f main.py --force
+              sudo calm launch bp -a az_devops_$(Build.BuildId) -i CentOS_Blueprint
+              sudo calm watch app az_devops_$(Build.BuildId)
+              sudo calm describe app az_devops_$(Build.BuildId) -o json | jq '.status.resources.deployment_list[].substrate_configuration.element_list[] | "\(.instance_name) \(.address)"'
+              sudo py3clean .
